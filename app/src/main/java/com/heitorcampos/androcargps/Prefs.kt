@@ -35,6 +35,18 @@ object Prefs {
         sp(c).edit().putString("codigo_recepcao", code).apply()
     }
 
+    const val INTERVAL_MIN = 100L
+    const val INTERVAL_MAX = 10_000L
+    const val INTERVAL_DEFAULT = 1000L
+
+    /** Intervalo de envio do GPS, em milissegundos (celular). */
+    fun intervalMs(c: Context): Long =
+        sp(c).getLong("intervalo_ms", INTERVAL_DEFAULT).coerceIn(INTERVAL_MIN, INTERVAL_MAX)
+
+    fun setIntervalMs(c: Context, ms: Long) {
+        sp(c).edit().putLong("intervalo_ms", ms.coerceIn(INTERVAL_MIN, INTERVAL_MAX)).apply()
+    }
+
     /** IPs do celular lidos do QR code. */
     fun qrHosts(c: Context): List<String> =
         sp(c).getString("ips_qr", null)?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()

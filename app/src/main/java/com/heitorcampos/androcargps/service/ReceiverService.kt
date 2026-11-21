@@ -180,11 +180,21 @@ class ReceiverService : Service() {
         }
     }
 
+    private var lastFixTime = 0L
+    private var avgMs = 0.0
+
     private fun onFix(f: Protocol.Fix) {
         val err = mock?.push(f)
+        val now = System.currentTimeMillis()
+        if (lastFixTime > 0 && now - lastFixTime < 15_000) {
+            val d = (now - lastFixTime).toDouble()
+            avgMs = if (avgMs == 0.0) d else avgMs * 0.7 + d * 0.3
+        }
+        lastFixTime = now
         AppState.receiver.update {
             it.copy(
-                lastFixAt = System.currentTimeMillis(),
+                measuredMs = if (avgMs > 0) avgMs.toLong() else null,
+                lastFixAt = now,
                 lat = f.lat,
                 lon = f.lon,
                 speedKmh = f.speed?.let { s -> s * 3.6f },

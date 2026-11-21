@@ -8,6 +8,9 @@ data class SenderStatus(
     val accuracy: Float? = null,
     val lastFixAt: Long = 0L,
     val error: String? = null,
+    /** Tempo real medido entre duas posições enviadas (ms). */
+    val measuredMs: Long? = null,
+    val speedKmh: Float? = null,
 )
 
 data class ReceiverStatus(
@@ -22,6 +25,8 @@ data class ReceiverStatus(
     val speedKmh: Float? = null,
     val accuracy: Float? = null,
     val mockError: String? = null,
+    /** Tempo real medido entre duas posições recebidas (ms). */
+    val measuredMs: Long? = null,
 )
 
 /** Estado compartilhado entre os serviços e as telas. */

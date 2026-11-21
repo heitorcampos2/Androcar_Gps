@@ -43,6 +43,16 @@ class SenderService : Service() {
 
     companion object {
         const val ACTION_STOP = "com.heitorcampos.androcargps.action.STOP_SENDER"
+        const val ACTION_APPLY_INTERVAL = "com.heitorcampos.androcargps.action.APPLY_INTERVAL"
+
+        /** Aplica o novo intervalo de envio sem derrubar a conexão com o tablet. */
+        fun applyInterval(c: Context) {
+            if (isRunning) {
+                runCatching {
+                    c.startService(Intent(c, SenderService::class.java).setAction(ACTION_APPLY_INTERVAL))
+                }
+            }
+        }
 
         @Volatile
         var isRunning = false
@@ -77,6 +87,16 @@ class SenderService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (intent?.action == ACTION_APPLY_INTERVAL) {
+            if (active) {
+                fused?.removeLocationUpdates(callback)
+                lastFixTime = 0L
+                startLocation()
+                return START_STICKY
+            }
             stopSelf()
             return START_NOT_STICKY
         }
@@ -182,8 +202,10 @@ class SenderService : Service() {
 
     @SuppressLint("MissingPermission")
     private fun startLocation() {
-        val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000L)
-            .setMinUpdateIntervalMillis(500L)
+        val ms = Prefs.intervalMs(this)
+        val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, ms)
+            .setMinUpdateIntervalMillis(ms)
+            .setMaxUpdateDelayMillis(0L)
             .build()
         val client = LocationServices.getFusedLocationProviderClient(this)
         fused = client
@@ -194,12 +216,23 @@ class SenderService : Service() {
         }
     }
 
+    private var lastFixTime = 0L
+    private var avgMs = 0.0
+
     private fun onFix(l: Location) {
         broadcast(Protocol.encode(l))
+        val now = System.currentTimeMillis()
+        if (lastFixTime > 0) {
+            val d = (now - lastFixTime).toDouble()
+            avgMs = if (avgMs == 0.0) d else avgMs * 0.7 + d * 0.3   // média suave
+        }
+        lastFixTime = now
         AppState.sender.update {
             it.copy(
-                lastFixAt = System.currentTimeMillis(),
+                lastFixAt = now,
                 accuracy = if (l.hasAccuracy()) l.accuracy else null,
+                measuredMs = if (avgMs > 0) avgMs.toLong() else null,
+                speedKmh = if (l.hasSpeed()) l.speed * 3.6f else null,
             )
         }
     }
