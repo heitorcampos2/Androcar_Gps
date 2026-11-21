@@ -13,6 +13,7 @@ import com.heitorcampos.androcargps.Net
 import com.heitorcampos.androcargps.Prefs
 import com.heitorcampos.androcargps.Protocol
 import com.heitorcampos.androcargps.ReceiverStatus
+import com.heitorcampos.androcargps.speedo.SpeedOverlay
 import kotlinx.coroutines.flow.update
 import java.io.BufferedReader
 import java.io.BufferedWriter
@@ -61,6 +62,14 @@ class ReceiverService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        if (intent?.action == SpeedOverlay.ACTION_REFRESH) {
+            if (active) {
+                overlay?.refresh(fromSettings = true)
+                return START_STICKY
+            }
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (active) return START_STICKY
 
         Notifs.ensureChannel(this)
@@ -85,6 +94,10 @@ class ReceiverService : Service() {
             .apply { setReferenceCounted(false) }
 
         AppState.receiver.value = ReceiverStatus(running = true, message = "Procurando o celular…")
+        overlay = SpeedOverlay(this) {
+            val s = AppState.receiver.value
+            if (s.lastFixAt > 0 && System.currentTimeMillis() - s.lastFixAt < 4000) s.speedKmh ?: 0f else null
+        }.also { it.refresh() }
         worker = thread(name = "androcar-receptor", isDaemon = true) { loop() }
         return START_STICKY
     }
@@ -191,6 +204,7 @@ class ReceiverService : Service() {
     private var lastFixTime = 0L
     private var avgMs = 0.0
     private var misses = 0
+    private var overlay: SpeedOverlay? = null
 
     @Synchronized
     @android.annotation.SuppressLint("WakelockTimeout")
@@ -256,6 +270,7 @@ class ReceiverService : Service() {
         isRunning = false
         runCatching { socket?.close() }
         worker?.interrupt()
+        overlay?.hide()
         mock?.disable()
         wakeLock?.let { if (it.isHeld) it.release() }
         wifiLock?.let { if (it.isHeld) it.release() }

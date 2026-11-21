@@ -47,6 +47,55 @@ object Prefs {
         sp(c).edit().putLong("intervalo_ms", ms.coerceIn(INTERVAL_MIN, INTERVAL_MAX)).apply()
     }
 
+    // ---------- Velocímetro flutuante
+    const val STYLE_DIGITAL = "digital"
+    const val STYLE_RING = "anel"
+    const val STYLE_ANALOG = "analogico"
+    const val THEME_DARK = "escuro"
+    const val THEME_LIGHT = "claro"
+    const val THEME_BLUE = "azul"
+
+    data class Speedo(
+        val enabled: Boolean,
+        val style: String,
+        val theme: String,
+        val sizeDp: Int,
+        val opacity: Int,
+        val maxKmh: Int,
+        val x: Int,
+        val y: Int,
+    )
+
+    fun speedo(c: Context): Speedo = sp(c).run {
+        Speedo(
+            enabled = getBoolean("velo_ativo", false),
+            style = getString("velo_estilo", STYLE_DIGITAL) ?: STYLE_DIGITAL,
+            theme = getString("velo_tema", THEME_LIGHT) ?: THEME_LIGHT,
+            sizeDp = getInt("velo_tamanho", 130).coerceIn(80, 260),
+            opacity = getInt("velo_opacidade", 95).coerceIn(30, 100),
+            maxKmh = getInt("velo_maximo", 160),
+            x = getInt("velo_x", 40),
+            y = getInt("velo_y", 200),
+        )
+    }
+
+    fun setSpeedo(c: Context, s: Speedo) {
+        sp(c).edit()
+            .putBoolean("velo_ativo", s.enabled)
+            .putString("velo_estilo", s.style)
+            .putString("velo_tema", s.theme)
+            .putInt("velo_tamanho", s.sizeDp)
+            .putInt("velo_opacidade", s.opacity)
+            .putInt("velo_maximo", s.maxKmh)
+            .putInt("velo_x", s.x)
+            .putInt("velo_y", s.y)
+            .apply()
+    }
+
+    fun setSpeedoPosition(c: Context, x: Int, y: Int) {
+        sp(c).edit().putInt("velo_x", x).putInt("velo_y", y).apply()
+    }
+
     /** IPs do celular lidos do QR code. */
     fun qrHosts(c: Context): List<String> =
         sp(c).getString("ips_qr", null)?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()

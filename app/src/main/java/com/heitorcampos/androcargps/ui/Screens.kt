@@ -482,6 +482,7 @@ private fun SettingsScreen(
                     }
                 },
                 right = {
+                    SpeedoCard()
                     InfoCard("Atualizações", Icons.Default.Notifications) {
                         var checking by remember { mutableStateOf(false) }
                         var msg by remember { mutableStateOf<String?>(null) }

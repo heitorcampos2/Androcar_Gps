@@ -21,6 +21,7 @@ import com.heitorcampos.androcargps.Perms
 import com.heitorcampos.androcargps.Prefs
 import com.heitorcampos.androcargps.Protocol
 import com.heitorcampos.androcargps.SenderStatus
+import com.heitorcampos.androcargps.speedo.SpeedOverlay
 import kotlinx.coroutines.flow.update
 import java.io.BufferedReader
 import java.io.BufferedWriter
@@ -87,6 +88,7 @@ class SenderService : Service() {
     private var lastFixTime = 0L
     private var avgMs = 0.0
     private var lastNotifText: String? = null
+    private var overlay: SpeedOverlay? = null
 
     private val callback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
@@ -100,6 +102,14 @@ class SenderService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (intent?.action == SpeedOverlay.ACTION_REFRESH) {
+            if (active) {
+                overlay?.refresh(fromSettings = true)
+                return START_STICKY
+            }
             stopSelf()
             return START_NOT_STICKY
         }
@@ -134,6 +144,10 @@ class SenderService : Service() {
         isRunning = true
         fused = LocationServices.getFusedLocationProviderClient(this)
         AppState.sender.value = SenderStatus(running = true)
+        overlay = SpeedOverlay(this) {
+            val s = AppState.sender.value
+            if (s.lastFixAt > 0 && System.currentTimeMillis() - s.lastFixAt < 4000) s.speedKmh ?: 0f else null
+        }.also { it.refresh() }
         startServer(Prefs.senderCode(this))
         // Sinal de vida só quando não houve posição recente (menos tráfego no Wi-Fi)
         ticker.scheduleWithFixedDelay({
@@ -284,6 +298,7 @@ class SenderService : Service() {
         active = false
         isRunning = false
         main.removeCallbacksAndMessages(null)
+        overlay?.hide()
         setGps(false)
         runCatching { server?.close() }
         clients.forEach { runCatching { it.socket.close() } }
