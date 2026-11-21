@@ -243,19 +243,29 @@ fun RowScope.Metric(label: String, value: String, unit: String = "", big: Boolea
         Column(Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
             Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
             Row(verticalAlignment = Alignment.Bottom) {
+                // Números longos (ex.: 1071 ms) ficam menores para caber com a unidade na mesma linha
+                val fs = when {
+                    big -> 44.sp
+                    value.length >= 4 -> 22.sp
+                    else -> 28.sp
+                }
                 Text(
                     value,
-                    fontSize = if (big) 44.sp else 28.sp,
+                    fontSize = fs,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
+                    softWrap = false,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
                 if (unit.isNotEmpty()) {
                     Spacer(Modifier.width(4.dp))
                     Text(
                         unit,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = if (big) 9.dp else 5.dp),
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(bottom = if (big) 9.dp else 4.dp),
                     )
                 }
             }

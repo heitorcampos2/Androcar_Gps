@@ -14,6 +14,20 @@
 
 ---
 
+## Prints
+
+<p align="center">
+  <img src="docs/prints/tablet-maps-velocimetro.jpg" alt="Google Maps navegando no tablet com o velocímetro flutuante"><br>
+  <sub>Tablet: Google Maps navegando com o GPS do celular, Spotify ao lado e o velocímetro flutuante</sub>
+</p>
+
+<table>
+  <tr>
+    <td align="center" width="28%"><img src="docs/prints/celular-enviando.jpg" alt="Celular enviando o GPS"><br><sub>Celular enviando o GPS</sub></td>
+    <td align="center"><img src="docs/prints/tablet-recebendo.jpg" alt="Tablet recebendo o GPS"><br><sub>Tablet recebendo o GPS</sub></td>
+  </tr>
+</table>
+
 ## Como funciona
 
 ```
