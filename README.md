@@ -69,7 +69,7 @@ Para o sistema não fechar o app no meio da viagem, em *Informações do app*, n
 - ✅ Pareamento por código de 4 dígitos
 - ✅ Reconecta sozinho se o Wi-Fi cair e avisa quando o sinal se perde
 - ✅ Botão nas configurações rápidas (barra de notificações) para ligar e desligar
-- ✅ Velocímetro flutuante por cima do Maps (digital, anel ou analógico; tamanho, cor e transparência ajustáveis)
+- ✅ Velocímetro flutuante por cima do Maps em 6 modelos (digital, anel, analógico, esportivo, neon e cromado), com cor, fundo, tamanho e transparência ajustáveis
 - ✅ Tempo de atualização ajustável em milissegundos
 - ✅ PIN, QR code e IPs escondidos com olhinho de privacidade
 - ✅ Economia de bateria: o GPS do celular só liga com o tablet conectado

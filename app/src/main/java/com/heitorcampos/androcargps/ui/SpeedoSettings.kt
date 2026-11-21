@@ -4,6 +4,10 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -128,6 +132,7 @@ fun SpeedoCard() {
                     v.style = s.style
                     v.theme = s.theme
                     v.maxKmh = s.maxKmh
+                    v.accent = s.accent
                     v.alpha = s.opacity / 100f
                     v.setSpeed(demo)
                 },
@@ -140,14 +145,21 @@ fun SpeedoCard() {
             listOf(Prefs.STYLE_DIGITAL to "Digital", Prefs.STYLE_RING to "Anel", Prefs.STYLE_ANALOG to "Analógico"),
             s.style,
         ) { save(s.copy(style = it)) }
-
-        Text("Cor", fontWeight = FontWeight.SemiBold)
         Choice(
-            listOf(Prefs.THEME_LIGHT to "Claro", Prefs.THEME_DARK to "Escuro", Prefs.THEME_BLUE to "Azul"),
+            listOf(Prefs.STYLE_SPORT to "Esportivo", Prefs.STYLE_NEON to "Neon", Prefs.STYLE_CHROME to "Cromado"),
+            s.style,
+        ) { save(s.copy(style = it)) }
+
+        Text("Fundo", fontWeight = FontWeight.SemiBold)
+        Choice(
+            listOf(Prefs.THEME_LIGHT to "Claro", Prefs.THEME_DARK to "Escuro", Prefs.THEME_BLUE to "Colorido"),
             s.theme,
         ) { save(s.copy(theme = it)) }
 
-        if (s.style != Prefs.STYLE_DIGITAL) {
+        Text("Cor de destaque", fontWeight = FontWeight.SemiBold)
+        AccentPicker(s.accent, onPreview = { s = s.copy(accent = it) }) { save(s.copy(accent = it)) }
+
+        if (s.style != Prefs.STYLE_DIGITAL) {  // anel, analógico, esportivo, neon e cromado usam a escala
             Text("Velocidade máxima do mostrador", fontWeight = FontWeight.SemiBold)
             Choice(
                 listOf("120" to "120", "160" to "160", "200" to "200", "240" to "240"),
@@ -203,3 +215,50 @@ private fun Choice(options: List<Pair<String, String>>, selected: String, onPick
     }
 }
 
+
+private val Swatches = listOf(
+    0xFF2F7CF6, 0xFF00BCD4, 0xFF34C77B, 0xFFB5E61D, 0xFFF5B341,
+    0xFFFF7A1A, 0xFFE53935, 0xFFFF4FA3, 0xFF9C5CFF, 0xFFFFFFFF,
+).map { it.toInt() }
+
+/** Paleta pronta + barra de matiz para qualquer cor. */
+@Composable
+private fun AccentPicker(color: Int, onPreview: (Int) -> Unit, onPick: (Int) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Swatches.chunked(5).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                row.forEach { c ->
+                    val on = c == color
+                    Box(
+                        Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Color(c))
+                            .border(if (on) 3.dp else 1.dp, if (on) MaterialTheme.colorScheme.onSurface else Color(0x33FFFFFF), CircleShape)
+                            .clickable { onPick(c) },
+                    )
+                }
+            }
+        }
+        // Matiz livre
+        val hsv = FloatArray(3).also { android.graphics.Color.colorToHSV(color, it) }
+        var hue by remember(color) { mutableStateOf(hsv[0]) }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Muted("Personalizada")
+            Box(Modifier.size(22.dp).clip(CircleShape).background(Color(color)))
+        }
+        Box(
+            Modifier.fillMaxWidth().height(14.dp).clip(RoundedCornerShape(7.dp))
+                .background(Brush.horizontalGradient((0..6).map { Color.hsv(it * 60f % 360f, 0.85f, 1f) })),
+        )
+        Slider(
+            value = hue,
+            onValueChange = {
+                hue = it
+                onPreview(android.graphics.Color.HSVToColor(floatArrayOf(it, 0.85f, 1f)))
+            },
+            onValueChangeFinished = { onPick(android.graphics.Color.HSVToColor(floatArrayOf(hue, 0.85f, 1f))) },
+            valueRange = 0f..359f,
+        )
+    }
+}

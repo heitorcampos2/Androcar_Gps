@@ -51,6 +51,10 @@ object Prefs {
     const val STYLE_DIGITAL = "digital"
     const val STYLE_RING = "anel"
     const val STYLE_ANALOG = "analogico"
+    const val STYLE_SPORT = "esportivo"
+    const val STYLE_NEON = "neon"
+    const val STYLE_CHROME = "cromado"
+    const val ACCENT_DEFAULT = 0xFF2F7CF6.toInt()
     const val THEME_DARK = "escuro"
     const val THEME_LIGHT = "claro"
     const val THEME_BLUE = "azul"
@@ -62,6 +66,8 @@ object Prefs {
         val sizeDp: Int,
         val opacity: Int,
         val maxKmh: Int,
+        /** Cor de destaque (anel, ponteiro, segmentos, brilho) — vale para todos os modelos. */
+        val accent: Int,
         val x: Int,
         val y: Int,
     )
@@ -74,6 +80,7 @@ object Prefs {
             sizeDp = getInt("velo_tamanho", 130).coerceIn(80, 260),
             opacity = getInt("velo_opacidade", 95).coerceIn(30, 100),
             maxKmh = getInt("velo_maximo", 160),
+            accent = getInt("velo_cor", ACCENT_DEFAULT),
             x = getInt("velo_x", 40),
             y = getInt("velo_y", 200),
         )
@@ -87,6 +94,7 @@ object Prefs {
             .putInt("velo_tamanho", s.sizeDp)
             .putInt("velo_opacidade", s.opacity)
             .putInt("velo_maximo", s.maxKmh)
+            .putInt("velo_cor", s.accent)
             .putInt("velo_x", s.x)
             .putInt("velo_y", s.y)
             .apply()

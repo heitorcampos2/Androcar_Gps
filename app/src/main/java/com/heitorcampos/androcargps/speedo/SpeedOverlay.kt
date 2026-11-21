@@ -82,6 +82,7 @@ class SpeedOverlay(
         d.style = s.style
         d.theme = s.theme
         d.maxKmh = s.maxKmh
+        d.accent = s.accent
         val px = dp(s.sizeDp)
         d.layoutParams = LinearLayout.LayoutParams(px, px)
         root?.alpha = s.opacity / 100f
@@ -99,6 +100,7 @@ class SpeedOverlay(
             style = s.style
             theme = s.theme
             maxKmh = s.maxKmh
+            accent = s.accent
             layoutParams = LinearLayout.LayoutParams(px, px)
         }
         val move = roundButton(R.drawable.ic_move, 0xFFE53935.toInt())
