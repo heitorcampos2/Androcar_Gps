@@ -5,6 +5,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.location.Location
+import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
@@ -36,23 +37,18 @@ import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
 /**
- * CELULAR: lê o GPS (1x por segundo, alta precisão) e envia para os tablets conectados.
- * Abre um servidor TCP na porta [Protocol.PORT]; o tablet se conecta e se identifica com o código.
+ * CELULAR: lê o GPS e envia para os tablets conectados (servidor TCP na porta [Protocol.PORT]).
+ *
+ * Economia de bateria: o GPS e o "manter acordado" só ficam ligados enquanto houver tablet
+ * conectado. Sem tablet, o celular só espera a conexão (quase não gasta nada); quando o tablet
+ * sai, espera 20 s antes de desligar o GPS, para uma reconexão rápida não perder o sinal.
  */
 class SenderService : Service() {
 
     companion object {
         const val ACTION_STOP = "com.heitorcampos.androcargps.action.STOP_SENDER"
         const val ACTION_APPLY_INTERVAL = "com.heitorcampos.androcargps.action.APPLY_INTERVAL"
-
-        /** Aplica o novo intervalo de envio sem derrubar a conexão com o tablet. */
-        fun applyInterval(c: Context) {
-            if (isRunning) {
-                runCatching {
-                    c.startService(Intent(c, SenderService::class.java).setAction(ACTION_APPLY_INTERVAL))
-                }
-            }
-        }
+        private const val IDLE_GPS_OFF_MS = 20_000L
 
         @Volatile
         var isRunning = false
@@ -64,6 +60,15 @@ class SenderService : Service() {
         fun stop(c: Context) {
             c.stopService(Intent(c, SenderService::class.java))
         }
+
+        /** Aplica o novo intervalo de envio sem derrubar a conexão com o tablet. */
+        fun applyInterval(c: Context) {
+            if (isRunning) {
+                runCatching {
+                    c.startService(Intent(c, SenderService::class.java).setAction(ACTION_APPLY_INTERVAL))
+                }
+            }
+        }
     }
 
     private class Client(val socket: Socket, val out: BufferedWriter)
@@ -71,17 +76,25 @@ class SenderService : Service() {
     private val clients = CopyOnWriteArrayList<Client>()
     private val io = Executors.newSingleThreadExecutor()
     private val ticker = Executors.newSingleThreadScheduledExecutor()
+    private val main = Handler(Looper.getMainLooper())
 
     @Volatile private var server: ServerSocket? = null
     @Volatile private var active = false
+    @Volatile private var lastSentAt = 0L
     private var fused: FusedLocationProviderClient? = null
+    private var gpsOn = false
     private var wakeLock: PowerManager.WakeLock? = null
+    private var lastFixTime = 0L
+    private var avgMs = 0.0
+    private var lastNotifText: String? = null
 
     private val callback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
             result.lastLocation?.let { onFix(it) }
         }
     }
+
+    private val gpsOffIfIdle = Runnable { if (clients.isEmpty()) setGps(false) }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -92,9 +105,10 @@ class SenderService : Service() {
         }
         if (intent?.action == ACTION_APPLY_INTERVAL) {
             if (active) {
-                fused?.removeLocationUpdates(callback)
-                lastFixTime = 0L
-                startLocation()
+                if (gpsOn) {
+                    setGps(false)
+                    setGps(true)
+                }
                 return START_STICKY
             }
             stopSelf()
@@ -118,14 +132,13 @@ class SenderService : Service() {
 
         active = true
         isRunning = true
-        wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
-            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AndrocarGps:envio")
-            .apply { setReferenceCounted(false); acquire() }
-
+        fused = LocationServices.getFusedLocationProviderClient(this)
         AppState.sender.value = SenderStatus(running = true)
         startServer(Prefs.senderCode(this))
-        startLocation()
-        ticker.scheduleAtFixedRate({ broadcast(Protocol.PING) }, 2, 2, TimeUnit.SECONDS)
+        // Sinal de vida só quando não houve posição recente (menos tráfego no Wi-Fi)
+        ticker.scheduleWithFixedDelay({
+            if (System.currentTimeMillis() - lastSentAt >= 2000) broadcast(Protocol.PING)
+        }, 2, 2, TimeUnit.SECONDS)
         return START_STICKY
     }
 
@@ -167,19 +180,19 @@ class SenderService : Service() {
             out.flush()
             s.soTimeout = 0
             client = Client(s, out).also { clients.add(it) }
-            refreshClients()
+            onClientsChanged()
             // O tablet não manda mais nada; a leitura só serve para perceber quando ele sai.
             while (active && input.readLine() != null) Unit
         } catch (_: IOException) {
         } finally {
             client?.let { clients.remove(it) }
             runCatching { s.close() }
-            refreshClients()
+            onClientsChanged()
         }
     }
 
     private fun broadcast(line: String) {
-        if (!active) return
+        if (!active || clients.isEmpty()) return
         try {
             io.execute {
                 var removed = false
@@ -194,37 +207,67 @@ class SenderService : Service() {
                         removed = true
                     }
                 }
-                if (removed) refreshClients()
+                lastSentAt = System.currentTimeMillis()
+                if (removed) onClientsChanged()
             }
         } catch (_: RejectedExecutionException) {
         }
     }
 
-    @SuppressLint("MissingPermission")
-    private fun startLocation() {
-        val ms = Prefs.intervalMs(this)
-        val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, ms)
-            .setMinUpdateIntervalMillis(ms)
-            .setMaxUpdateDelayMillis(0L)
-            .build()
-        val client = LocationServices.getFusedLocationProviderClient(this)
-        fused = client
-        try {
-            client.requestLocationUpdates(req, callback, Looper.getMainLooper())
-        } catch (_: SecurityException) {
-            AppState.sender.update { it.copy(error = "Permissão de localização negada") }
+    /** Liga o GPS quando chega um tablet; desliga 20 s depois que o último sai. */
+    private fun onClientsChanged() {
+        main.post {
+            if (!active) return@post
+            val n = clients.size
+            main.removeCallbacks(gpsOffIfIdle)
+            if (n > 0) setGps(true) else if (gpsOn) main.postDelayed(gpsOffIfIdle, IDLE_GPS_OFF_MS)
+            AppState.sender.update { it.copy(clients = n) }
+            val text = if (n > 0) "Tablet conectado" else "Aguardando o tablet (GPS em espera)"
+            if (text != lastNotifText) {
+                lastNotifText = text
+                Notifs.notify(this, Notifs.ID_SENDER, Notifs.sender(this, text))
+            }
         }
     }
 
-    private var lastFixTime = 0L
-    private var avgMs = 0.0
+    /** Sempre na thread principal. */
+    @SuppressLint("MissingPermission", "WakelockTimeout")
+    private fun setGps(on: Boolean) {
+        if (on == gpsOn) return
+        val client = fused ?: return
+        if (on) {
+            val ms = Prefs.intervalMs(this)
+            val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, ms)
+                .setMinUpdateIntervalMillis(ms)
+                .setMaxUpdateDelayMillis(0L)
+                .build()
+            try {
+                client.requestLocationUpdates(req, callback, Looper.getMainLooper())
+                gpsOn = true
+                lastFixTime = 0L
+                avgMs = 0.0
+                // Mantém o celular acordado só enquanto está enviando
+                wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
+                    .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AndrocarGps:envio")
+                    .apply { setReferenceCounted(false); acquire() }
+            } catch (_: SecurityException) {
+                AppState.sender.update { it.copy(error = "Permissão de localização negada") }
+            }
+        } else {
+            client.removeLocationUpdates(callback)
+            gpsOn = false
+            wakeLock?.let { if (it.isHeld) it.release() }
+            wakeLock = null
+        }
+        AppState.sender.update { it.copy(gpsOn = gpsOn) }
+    }
 
     private fun onFix(l: Location) {
         broadcast(Protocol.encode(l))
         val now = System.currentTimeMillis()
         if (lastFixTime > 0) {
             val d = (now - lastFixTime).toDouble()
-            avgMs = if (avgMs == 0.0) d else avgMs * 0.7 + d * 0.3   // média suave
+            avgMs = if (avgMs == 0.0) d else avgMs * 0.7 + d * 0.3 // média suave
         }
         lastFixTime = now
         AppState.sender.update {
@@ -237,27 +280,16 @@ class SenderService : Service() {
         }
     }
 
-    private fun refreshClients() {
-        val n = clients.size
-        AppState.sender.update { it.copy(clients = n) }
-        if (active) {
-            Notifs.notify(
-                this, Notifs.ID_SENDER,
-                Notifs.sender(this, if (n > 0) "Tablet conectado" else "Aguardando o tablet…"),
-            )
-        }
-    }
-
     override fun onDestroy() {
         active = false
         isRunning = false
-        fused?.removeLocationUpdates(callback)
+        main.removeCallbacksAndMessages(null)
+        setGps(false)
         runCatching { server?.close() }
         clients.forEach { runCatching { it.socket.close() } }
         clients.clear()
         ticker.shutdownNow()
         io.shutdownNow()
-        wakeLock?.let { if (it.isHeld) it.release() }
         AppState.sender.value = SenderStatus()
         super.onDestroy()
     }

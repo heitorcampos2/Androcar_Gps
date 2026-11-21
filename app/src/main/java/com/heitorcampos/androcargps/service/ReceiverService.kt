@@ -79,10 +79,10 @@ class ReceiverService : Service() {
         mock = MockLocation(this)
         wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AndrocarGps:recepcao")
-            .apply { setReferenceCounted(false); acquire() }
+            .apply { setReferenceCounted(false) }
         wifiLock = (applicationContext.getSystemService(WIFI_SERVICE) as WifiManager)
             .createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "AndrocarGps:wifi")
-            .apply { setReferenceCounted(false); acquire() }
+            .apply { setReferenceCounted(false) }
 
         AppState.receiver.value = ReceiverStatus(running = true, message = "Procurando o celular…")
         worker = thread(name = "androcar-receptor", isDaemon = true) { loop() }
@@ -123,13 +123,16 @@ class ReceiverService : Service() {
                 if (active) {
                     status(
                         false,
-                        "Celular não encontrado (tentei ${hosts.joinToString(", ")}). O envio está ligado no celular?",
+                        "Celular não encontrado. O envio está ligado no celular e o tablet no hotspot dele?",
                         true,
                     )
-                    pause(2000)
+                    // Procura com calma quando o celular não aparece: 2 s, 3 s, 4 s… até 8 s (poupa bateria)
+                    pause((2000L + misses * 1000L).coerceAtMost(8000L))
+                    misses++
                 }
                 continue
             }
+            misses = 0
 
             var linked = false
             try {
@@ -148,12 +151,17 @@ class ReceiverService : Service() {
                         return@use
                     }
                     linked = true
-                    status(true, "Conectado ao celular ($host)", host = host)
-                    while (active) {
-                        val line = input.readLine() ?: break
-                        if (line == Protocol.PING) continue
-                        val fix = Protocol.decode(line) ?: continue
-                        onFix(fix)
+                    status(true, "Conectado ao celular", host = host)
+                    holdLocks(true) // acordado e Wi-Fi em alto desempenho só enquanto recebe
+                    try {
+                        while (active) {
+                            val line = input.readLine() ?: break
+                            if (line == Protocol.PING) continue
+                            val fix = Protocol.decode(line) ?: continue
+                            onFix(fix)
+                        }
+                    } finally {
+                        holdLocks(false)
                     }
                 }
             } catch (_: SocketTimeoutException) {
@@ -161,7 +169,7 @@ class ReceiverService : Service() {
                     status(
                         false,
                         if (linked) "Sinal do celular perdido — reconectando…"
-                        else "O celular não respondeu em $host — o envio está ligado lá?",
+                        else "O celular não respondeu — o envio está ligado lá?",
                         true, host,
                     )
                 }
@@ -170,7 +178,7 @@ class ReceiverService : Service() {
                     status(
                         false,
                         if (linked) "Conexão caiu — reconectando…"
-                        else "Celular não encontrado em $host — o envio está ligado lá?",
+                        else "Celular não encontrado — o envio está ligado lá?",
                         true, host,
                     )
                 }
@@ -182,6 +190,22 @@ class ReceiverService : Service() {
 
     private var lastFixTime = 0L
     private var avgMs = 0.0
+    private var misses = 0
+
+    @Synchronized
+    @android.annotation.SuppressLint("WakelockTimeout")
+    private fun holdLocks(on: Boolean) {
+        try {
+            if (on && active) {
+                wakeLock?.let { if (!it.isHeld) it.acquire() }
+                wifiLock?.let { if (!it.isHeld) it.acquire() }
+            } else {
+                wakeLock?.let { if (it.isHeld) it.release() }
+                wifiLock?.let { if (it.isHeld) it.release() }
+            }
+        } catch (_: Exception) {
+        }
+    }
 
     private fun onFix(f: Protocol.Fix) {
         val err = mock?.push(f)

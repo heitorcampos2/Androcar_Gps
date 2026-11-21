@@ -38,6 +38,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -130,10 +131,26 @@ fun AppBadge(size: Int = 44) {
     }
 }
 
+/** Troca letras e números por bolinhas (mantém pontos e espaços: "10.84.1.2" → "••.••.•.•"). */
+fun mask(s: String): String = s.map { if (it.isLetterOrDigit()) '•' else it }.joinToString("")
+
+/** Olhinho: mostra/esconde informação sensível (PIN, QR code, IPs). */
+@Composable
+fun EyeButton(shown: Boolean, onToggle: () -> Unit) {
+    IconButton(onClick = onToggle) {
+        Icon(
+            painterResource(if (shown) R.drawable.ic_eye_off else R.drawable.ic_eye),
+            contentDescription = if (shown) "Esconder" else "Mostrar",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 @Composable
 fun InfoCard(
     title: String? = null,
     icon: ImageVector? = null,
+    action: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Card(
@@ -152,7 +169,13 @@ fun InfoCard(
                         ) { Icon(icon, null, tint = Azul, modifier = Modifier.size(18.dp)) }
                         Spacer(Modifier.width(12.dp))
                     }
-                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    action?.invoke()
                 }
             }
             content()

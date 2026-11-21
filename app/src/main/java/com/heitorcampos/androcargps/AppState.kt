@@ -11,6 +11,8 @@ data class SenderStatus(
     /** Tempo real medido entre duas posições enviadas (ms). */
     val measuredMs: Long? = null,
     val speedKmh: Float? = null,
+    /** GPS ligado (só fica ligado com tablet conectado, para economizar bateria). */
+    val gpsOn: Boolean = false,
 )
 
 data class ReceiverStatus(

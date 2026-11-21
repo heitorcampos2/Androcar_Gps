@@ -61,6 +61,8 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.heitorcampos.androcargps.AppState
@@ -224,7 +226,11 @@ private fun SenderScreen(update: UpdateInfo?) {
                 when {
                     !st.running -> StatusHero(Cinza, "Parado", "Toque em Iniciar para enviar o GPS")
                     st.clients > 0 -> StatusHero(Verde, "Enviando para o tablet", gps, pulse = true)
-                    else -> StatusHero(Amarelo, "Aguardando o tablet", gps, pulse = true)
+                    else -> StatusHero(
+                        Amarelo, "Aguardando o tablet",
+                        if (st.gpsOn) gps else "GPS em espera até o tablet conectar (economiza bateria)",
+                        pulse = true,
+                    )
                 }
                 st.error?.let { InfoCard("Atenção") { Text(it, color = Vermelho) } }
                 BigToggle(st.running, onStart = start, onStop = { SenderService.stop(ctx) })
@@ -233,16 +239,39 @@ private fun SenderScreen(update: UpdateInfo?) {
                     Metric("Velocidade", if (fresh) "${st.speedKmh?.roundToInt() ?: 0}" else "—", "km/h")
                     Metric("Envio", if (st.running) formatMs(st.measuredMs ?: interval) else "$interval", "ms")
                 }
-                InfoCard("Rede", Icons.Default.Share) {
-                    InfoRow("IP deste celular", ips.joinToString("\n").ifEmpty { "sem rede" })
+                var showIps by rememberSaveable { mutableStateOf(false) }
+                InfoCard("Rede", Icons.Default.Share, action = { EyeButton(showIps) { showIps = !showIps } }) {
+                    InfoRow(
+                        "IP deste celular",
+                        ips.joinToString("\n") { if (showIps) it else mask(it) }.ifEmpty { "sem rede" },
+                    )
                     InfoRow("Tablets conectados", "${st.clients}")
                     Muted("Ligue o roteador (hotspot) do celular e conecte o tablet nele.")
                 }
             },
             right = {
-                InfoCard("Parear com o tablet", Icons.Default.Lock) {
+                var showPair by rememberSaveable { mutableStateOf(false) }
+                InfoCard("Parear com o tablet", Icons.Default.Lock, action = { EyeButton(showPair) { showPair = !showPair } }) {
                     Muted("No tablet, toque em \"Escanear QR code do celular\" e aponte a câmera para cá:")
-                    if (qr != null) {
+                    if (!showPair) {
+                        // QR e PIN escondidos: toque para mostrar
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            Column(
+                                Modifier
+                                    .size(254.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .clickable { showPair = true },
+                                verticalArrangement = Arrangement.Center,
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Icon(Icons.Default.Lock, null, tint = Azul, modifier = Modifier.size(40.dp))
+                                Spacer(Modifier.height(10.dp))
+                                Text("QR code oculto", fontWeight = FontWeight.SemiBold)
+                                Muted("Toque para mostrar")
+                            }
+                        }
+                    } else if (qr != null) {
                         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                             Box(
                                 Modifier
@@ -261,7 +290,7 @@ private fun SenderScreen(update: UpdateInfo?) {
                     Muted("Ou digite o código no tablet:")
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                         Text(
-                            code.toCharArray().joinToString("  "),
+                            (if (showPair) code else mask(code)).toCharArray().joinToString("  "),
                             fontSize = 46.sp, fontWeight = FontWeight.Bold, color = Azul,
                         )
                     }
@@ -351,7 +380,8 @@ private fun ReceiverScreen(update: UpdateInfo?) {
                 }
             },
             right = {
-                InfoCard("Posição", Icons.Default.Place) {
+                var showHost by rememberSaveable { mutableStateOf(false) }
+                InfoCard("Posição", Icons.Default.Place, action = { EyeButton(showHost) { showHost = !showHost } }) {
                     InfoRow(
                         "Coordenadas",
                         if (st.lat != null && st.lon != null) {
@@ -360,7 +390,7 @@ private fun ReceiverScreen(update: UpdateInfo?) {
                             "—"
                         },
                     )
-                    InfoRow("Celular", st.host ?: "—")
+                    InfoRow("IP do celular", st.host?.let { if (showHost) it else mask(it) } ?: "—")
                     Muted("O tempo de atualização é ajustado no celular, em Configurações.")
                 }
                 if (paired) PairingCard(code, highlight = false, onScan = scan, onCode = onCode)
@@ -390,12 +420,15 @@ private fun PairingCard(code: String, highlight: Boolean, onScan: () -> Unit, on
                 style = MaterialTheme.typography.titleMedium,
             )
         }
+        var showCode by rememberSaveable { mutableStateOf(false) }
         OutlinedTextField(
             value = code,
             onValueChange = { v -> onCode(v.filter { it.isDigit() }.take(4)) },
             label = { Text("Ou digite o código de 4 dígitos do celular") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            visualTransformation = if (showCode) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = { EyeButton(showCode) { showCode = !showCode } },
             modifier = Modifier.fillMaxWidth(),
         )
         if (code.length == 4) Text("Código salvo ✓", color = Verde)
@@ -430,9 +463,10 @@ private fun SettingsScreen(
                     }
                     if (send) {
                         IntervalCard()
-                        InfoCard("Pareamento", Icons.Default.Lock) {
+                        var showCode by rememberSaveable { mutableStateOf(false) }
+                        InfoCard("Pareamento", Icons.Default.Lock, action = { EyeButton(showCode) { showCode = !showCode } }) {
                             var code by remember { mutableStateOf(Prefs.senderCode(ctx)) }
-                            InfoRow("Código atual", code)
+                            InfoRow("Código atual", if (showCode) code else mask(code))
                             WideOutlined("Gerar novo código") {
                                 code = Prefs.newSenderCode(ctx)
                                 if (SenderService.isRunning) {
@@ -554,13 +588,14 @@ private fun ConnectionCard() {
             (Prefs.receiverCode(ctx)?.length ?: 0) != 4 ->
                 Intents.toast(ctx, "IP salvo. Falta o código de pareamento: volte e escaneie o QR code do celular.")
             ReceiverService.isRunning ->
-                Intents.toast(ctx, if (host.isEmpty()) "Modo automático salvo. Conectando…" else "IP salvo. Conectando em $host…")
+                Intents.toast(ctx, if (host.isEmpty()) "Modo automático salvo. Conectando…" else "IP salvo. Conectando…")
             else -> {
                 start()
                 Intents.toast(ctx, "IP salvo. Conectando…")
             }
         }
     }
+    var showIp by rememberSaveable { mutableStateOf(false) }
     InfoCard("Conexão", Icons.Default.Share) {
         OutlinedTextField(
             value = host,
@@ -570,6 +605,8 @@ private fun ConnectionCard() {
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { save() }),
+            visualTransformation = if (showIp) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = { EyeButton(showIp) { showIp = !showIp } },
             modifier = Modifier.fillMaxWidth(),
         )
         Button(
