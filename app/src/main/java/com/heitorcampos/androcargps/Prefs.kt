@@ -35,6 +35,14 @@ object Prefs {
         sp(c).edit().putString("codigo_recepcao", code).apply()
     }
 
+    /** IPs do celular lidos do QR code. */
+    fun qrHosts(c: Context): List<String> =
+        sp(c).getString("ips_qr", null)?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+
+    fun setQrHosts(c: Context, hosts: List<String>) {
+        sp(c).edit().putString("ips_qr", hosts.joinToString(",")).apply()
+    }
+
     /** IP do celular digitado à mão (vazio = automático). */
     fun manualHost(c: Context): String? =
         sp(c).getString("ip_manual", null)?.trim()?.takeIf { it.isNotEmpty() }

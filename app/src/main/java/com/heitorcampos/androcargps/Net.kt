@@ -16,6 +16,16 @@ object Net {
      */
     fun findPhone(c: Context): String? = Prefs.manualHost(c) ?: wifiGateway(c)
 
+    /**
+     * Todos os endereços onde o celular pode estar, em ordem de tentativa:
+     * IP digitado → gateway do Wi-Fi (hotspot do celular) → IPs lidos do QR code.
+     */
+    fun candidates(c: Context): List<String> = LinkedHashSet<String>().apply {
+        Prefs.manualHost(c)?.let { add(it) }
+        wifiGateway(c)?.let { add(it) }
+        addAll(Prefs.qrHosts(c))
+    }.toList()
+
     @Suppress("DEPRECATION")
     fun wifiGateway(c: Context): String? {
         try {

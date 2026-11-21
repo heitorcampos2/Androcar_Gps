@@ -1,7 +1,23 @@
 package com.heitorcampos.androcargps.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Button
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import com.heitorcampos.androcargps.Pairing
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
+import kotlinx.coroutines.delay
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -171,18 +187,43 @@ private fun SenderScreen(update: UpdateInfo?) {
         st.error?.let { InfoCard("Atenção") { Text(it, color = Vermelho) } }
         BigToggle(st.running, onStart = start, onStop = { SenderService.stop(ctx) })
 
-        InfoCard("Código de pareamento") {
+        // Atualiza os IPs a cada 5 s (o hotspot pode ser ligado depois de abrir o app)
+        val ips by produceState(Net.localIps()) {
+            while (true) {
+                delay(5000)
+                value = Net.localIps()
+            }
+        }
+        val qr = remember(code, ips) { Pairing.qr(Pairing.uri(code, ips)) }
+
+        InfoCard("Parear com o tablet") {
+            Muted("No tablet, toque em \"Escanear QR code do celular\" e aponte a câmera para cá:")
+            if (qr != null) {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color.White)
+                            .padding(10.dp),
+                    ) {
+                        Image(
+                            bitmap = qr.asImageBitmap(),
+                            contentDescription = "QR code de pareamento",
+                            modifier = Modifier.size(240.dp),
+                        )
+                    }
+                }
+            }
+            Muted("Ou digite o código no tablet:")
             Text(
                 code.toCharArray().joinToString("  "),
                 fontSize = 44.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary,
             )
-            Muted("Digite este código no tablet (só na primeira vez).")
         }
 
         InfoCard("Rede") {
-            val ips = remember(st.running) { Net.localIps() }
-            InfoRow("IP deste celular", ips.joinToString("  ·  ").ifEmpty { "sem rede" })
-            Muted("Ligue o roteador (hotspot) do celular e conecte o tablet nele: o tablet encontra o celular sozinho.")
+            InfoRow("IP deste celular", ips.joinToString("\n").ifEmpty { "sem rede" })
+            Muted("Ligue o roteador (hotspot) do celular e conecte o tablet nele.")
         }
 
         XiaomiCard()
@@ -198,12 +239,45 @@ private fun ReceiverScreen(update: UpdateInfo?) {
     val now by rememberNow()
     var code by remember { mutableStateOf(Prefs.receiverCode(ctx) ?: "") }
     val start = rememberStarter { ReceiverService.start(ctx) }
+    val paired = code.length == 4
+
+    // Leitor de QR code (câmera)
+    val scanner = rememberLauncherForActivityResult(ScanContract()) { result ->
+        val p = Pairing.parse(result.contents)
+        if (p == null) {
+            if (result.contents != null) Intents.toast(ctx, "Esse QR code não é do Androcar GPS")
+        } else {
+            code = p.code
+            Prefs.setReceiverCode(ctx, p.code)
+            Prefs.setQrHosts(ctx, p.hosts)
+            Intents.toast(ctx, "Pareado com o celular!")
+            if (!ReceiverService.isRunning) start()
+        }
+    }
+    val scan = {
+        scanner.launch(
+            ScanOptions()
+                .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                .setPrompt("Aponte para o QR code na tela do celular")
+                .setBeepEnabled(false)
+                .setOrientationLocked(false),
+        )
+    }
 
     val age = if (st.lastFixAt > 0) (now - st.lastFixAt) / 1000 else null
     val fresh = age != null && age < 4
 
     ScreenColumn {
         update?.let { UpdateCard(it) }
+
+        // Sem pareamento: o pareamento vem primeiro, em destaque
+        if (!paired) {
+            PairingCard(code, highlight = true, onScan = scan) { d ->
+                code = d
+                Prefs.setReceiverCode(ctx, d)
+            }
+        }
+
         when {
             !st.running -> StatusHero(Cinza, "Parado", "Toque em Iniciar para receber o GPS do celular")
             st.mockError != null -> StatusHero(Vermelho, "Local fictício bloqueado", st.mockError)
@@ -229,19 +303,11 @@ private fun ReceiverScreen(update: UpdateInfo?) {
             InfoRow("Celular", st.host ?: "—")
         }
 
-        InfoCard("Código de pareamento") {
-            OutlinedTextField(
-                value = code,
-                onValueChange = { v ->
-                    val d = v.filter { it.isDigit() }.take(4)
-                    code = d
-                    Prefs.setReceiverCode(ctx, d)
-                },
-                label = { Text("Código de 4 dígitos mostrado no celular") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                modifier = Modifier.fillMaxWidth(),
-            )
+        if (paired) {
+            PairingCard(code, highlight = false, onScan = scan) { d ->
+                code = d
+                Prefs.setReceiverCode(ctx, d)
+            }
         }
 
         InfoCard("Configuração única do tablet") {
@@ -252,6 +318,32 @@ private fun ReceiverScreen(update: UpdateInfo?) {
         }
 
         XiaomiCard()
+    }
+}
+
+@Composable
+private fun PairingCard(code: String, highlight: Boolean, onScan: () -> Unit, onCode: (String) -> Unit) {
+    InfoCard(if (highlight) "1º passo: parear com o celular" else "Pareamento") {
+        if (highlight) Muted("No celular, abra o Androcar GPS em \"Enviar GPS\" e toque em Iniciar. Depois:")
+        Button(
+            onClick = onScan,
+            modifier = Modifier.fillMaxWidth().height(if (highlight) 64.dp else 52.dp),
+            shape = RoundedCornerShape(18.dp),
+        ) {
+            Text(
+                if (highlight) "Escanear QR code do celular" else "Parear de novo (QR code)",
+                style = MaterialTheme.typography.titleMedium,
+            )
+        }
+        OutlinedTextField(
+            value = code,
+            onValueChange = { v -> onCode(v.filter { it.isDigit() }.take(4)) },
+            label = { Text("Ou digite o código de 4 dígitos do celular") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (code.length == 4) Muted("Código salvo ✓")
     }
 }
 
@@ -297,19 +389,38 @@ private fun SettingsScreen(
             } else {
                 InfoCard("Conexão") {
                     var host by remember { mutableStateOf(Prefs.manualHost(ctx) ?: "") }
+                    val focus = LocalFocusManager.current
+                    val start = rememberStarter { ReceiverService.start(ctx) }
+                    val save = {
+                        focus.clearFocus()
+                        Prefs.setManualHost(ctx, host)
+                        when {
+                            (Prefs.receiverCode(ctx)?.length ?: 0) != 4 ->
+                                Intents.toast(ctx, "IP salvo. Falta o código de pareamento: volte e escaneie o QR code do celular.")
+                            ReceiverService.isRunning ->
+                                Intents.toast(ctx, if (host.isEmpty()) "Modo automático salvo. Conectando…" else "IP salvo. Conectando em $host…")
+                            else -> {
+                                start()
+                                Intents.toast(ctx, "IP salvo. Conectando…")
+                            }
+                        }
+                    }
                     OutlinedTextField(
                         value = host,
-                        onValueChange = {
-                            host = it.trim()
-                            Prefs.setManualHost(ctx, host)
-                        },
+                        onValueChange = { host = it.trim() },
                         label = { Text("IP do celular (opcional)") },
                         placeholder = { Text("Automático") },
                         singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { save() }),
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Muted("Deixe em branco: no roteador do celular o tablet acha o celular sozinho. Use só se os dois estiverem em outra rede Wi-Fi.")
+                    Button(
+                        onClick = save,
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape = RoundedCornerShape(14.dp),
+                    ) { Text("Salvar e conectar") }
+                    Muted("Deixe em branco para o modo automático (o QR code já traz os IPs do celular). Use só se precisar forçar um IP.")
                 }
             }
 

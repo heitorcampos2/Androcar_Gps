@@ -69,4 +69,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.google.android.gms:play-services-location:21.3.0")
+    // QR code: gerar no celular e ler com a câmera do tablet
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 }

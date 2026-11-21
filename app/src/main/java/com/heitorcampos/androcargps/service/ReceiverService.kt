@@ -97,18 +97,44 @@ class ReceiverService : Service() {
                 pause(2000)
                 continue
             }
-            val host = Net.findPhone(this)
-            if (host == null) {
-                status(false, "Procurando o celular… ligue o tablet no roteador (hotspot) do celular")
+            val hosts = Net.candidates(this)
+            if (hosts.isEmpty()) {
+                status(false, "Procurando o celular… ligue o tablet no roteador (hotspot) do celular", true)
                 pause(2000)
+                continue
+            }
+
+            // Tenta cada endereço possível do celular até um responder
+            var found: Socket? = null
+            var host = hosts.first()
+            for (h in hosts) {
+                if (!active) break
+                val t = Socket()
+                try {
+                    t.connect(InetSocketAddress(h, Protocol.PORT), 2000)
+                    found = t
+                    host = h
+                    break
+                } catch (_: IOException) {
+                    runCatching { t.close() }
+                }
+            }
+            if (found == null) {
+                if (active) {
+                    status(
+                        false,
+                        "Celular não encontrado (tentei ${hosts.joinToString(", ")}). O envio está ligado no celular?",
+                        true,
+                    )
+                    pause(2000)
+                }
                 continue
             }
 
             var linked = false
             try {
-                Socket().use { s ->
+                found.use { s ->
                     socket = s
-                    s.connect(InetSocketAddress(host, Protocol.PORT), 4000)
                     s.tcpNoDelay = true
                     s.soTimeout = 6000
                     val input = BufferedReader(InputStreamReader(s.getInputStream(), Charsets.UTF_8))

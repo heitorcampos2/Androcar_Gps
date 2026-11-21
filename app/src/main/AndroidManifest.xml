@@ -40,6 +40,12 @@
             </intent-filter>
         </activity>
 
+        <!-- Leitor de QR code: gira junto com o aparelho (tablet em paisagem, celular em retrato) -->
+        <activity
+            android:name="com.journeyapps.barcodescanner.CaptureActivity"
+            android:screenOrientation="fullSensor"
+            tools:replace="screenOrientation" />
+
         <service
             android:name=".service.SenderService"
             android:exported="false"
